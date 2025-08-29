@@ -1,0 +1,439 @@
+
+openapi: 3.0.3
+info:
+  title: LGS Tracker API
+  version: "0.1.0"
+  description: Offline REST API for LGS tracking (FastAPI). All timestamps are ISO-8601 UTC; clients render as Europe/Istanbul.
+servers:
+  - url: http://localhost:8000
+    description: Local offline server
+security:
+  - cookieAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /auth/login:
+    post:
+      summary: Login with username/email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                remember:
+                  type: boolean
+              oneOf:
+                - required: [username, password]
+                - required: [email, password]
+      responses:
+        '200':
+          description: Logged in; session cookie set
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMe'
+        '401':
+          description: Invalid credentials
+  /auth/logout:
+    post:
+      summary: Logout current session
+      responses:
+        '204':
+          description: No Content
+  /me:
+    get:
+      summary: Current user profile and scope
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMe'
+  /students:
+    get:
+      summary: List students (filterable)
+      parameters:
+        - in: query
+          name: grade
+          schema: { type: integer, minimum: 5, maximum: 8 }
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Search query by name
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Student' }
+                  total:
+                    type: integer
+  /students/{id}:
+    get:
+      summary: Get a student
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Student' }
+  /students/import:
+    post:
+      summary: Bulk import students via CSV (Rooter only)
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Import completed; rejects CSV (if any) is returned
+          content:
+            text/csv:
+              schema:
+                type: string
+  /teachers:
+    get:
+      summary: List teachers (Rooter)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Teacher' }
+    post:
+      summary: Create teacher (Rooter)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeacherCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Teacher' }
+  /teachers/{id}/reset-temp-password:
+    post:
+      summary: Reset temporary password (Rooter)
+      responses:
+        '200':
+          description: Temporary password issued; must change on next login
+  /classes:
+    get:
+      summary: List class sections
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ClassSection' }
+  /trials:
+    get:
+      summary: List trial exams
+      parameters:
+        - in: query
+          name: grade
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TrialExam' }
+    post:
+      summary: Create trial exam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrialExamCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrialExam' }
+  /trials/{id}/finalize:
+    post:
+      summary: Finalize trial exam (Rooter only)
+      responses:
+        '200':
+          description: Finalized
+  /trial-results:
+    post:
+      summary: Enter trial result for a student
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrialResultCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrialResult' }
+  /workbooks:
+    get:
+      summary: List workbooks
+      parameters:
+        - in: query
+          name: grade
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Workbook' }
+  /students/{id}/workbooks:
+    post:
+      summary: Assign a workbook to a student
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StudentWorkbookCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentWorkbook' }
+  /audit:
+    get:
+      summary: Audit log viewer (Rooter)
+      parameters:
+        - in: query
+          name: actor_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: entity_type
+          schema: { type: string }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditLog' }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: lgs_session
+  schemas:
+    AuthMe:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string }
+        role: { type: string, enum: [rooter, teacher] }
+        email: { type: string }
+        username: { type: string }
+        must_change_password: { type: boolean }
+        scope:
+          type: array
+          items:
+            type: object
+            properties:
+              grade: { type: integer }
+              class_section: { type: string, nullable: true }
+    Student:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string }
+        grade: { type: integer }
+        class_section: { type: string }
+        guardian_name: { type: string }
+        guardian_phone: { type: string }
+        guardian_email: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Teacher:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string }
+        email: { type: string }
+        username: { type: string }
+        status: { type: string }
+        must_change_password: { type: boolean }
+    TeacherCreate:
+      type: object
+      required: [full_name, email, username]
+      properties:
+        full_name: { type: string }
+        email: { type: string }
+        username: { type: string }
+    ClassSection:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        grade: { type: integer }
+        label: { type: string }
+        active: { type: boolean }
+    TrialExam:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        source: { type: string }
+        date: { type: string, format: date }
+        grade_scope:
+          type: array
+          items: { type: integer }
+        subjects_config_id: { type: string, format: uuid }
+        is_finalized: { type: boolean }
+    TrialExamCreate:
+      type: object
+      required: [name, date, grade_scope, subjects_config_id]
+      properties:
+        name: { type: string }
+        source: { type: string }
+        date: { type: string, format: date }
+        grade_scope:
+          type: array
+          items: { type: integer }
+        subjects_config_id: { type: string, format: uuid }
+    TrialResultCreate:
+      type: object
+      required: [student_id, trial_exam_id, subjects]
+      properties:
+        student_id: { type: string, format: uuid }
+        trial_exam_id: { type: string, format: uuid }
+        subjects:
+          type: array
+          description: Per-subject totals
+          items:
+            type: object
+            required: [subject_code, correct, wrong, blank]
+            properties:
+              subject_code: { type: string }
+              correct: { type: integer }
+              wrong: { type: integer }
+              blank: { type: integer }
+    TrialResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        student_id: { type: string, format: uuid }
+        trial_exam_id: { type: string, format: uuid }
+        correct_total: { type: integer }
+        wrong_total: { type: integer }
+        blank_total: { type: integer }
+        net_total: { type: number, format: float }
+        subjects:
+          type: array
+          items:
+            type: object
+            properties:
+              subject_code: { type: string }
+              correct: { type: integer }
+              wrong: { type: integer }
+              blank: { type: integer }
+              net: { type: number, format: float }
+    Workbook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        subject_code: { type: string }
+        grade: { type: integer }
+        publisher: { type: string }
+        total_units: { type: integer }
+        total_pages: { type: integer }
+    StudentWorkbookCreate:
+      type: object
+      required: [workbook_id, target_date]
+      properties:
+        workbook_id: { type: string, format: uuid }
+        target_date: { type: string, format: date, nullable: true }
+    StudentWorkbook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        student_id: { type: string, format: uuid }
+        workbook_id: { type: string, format: uuid }
+        assigned_by: { type: string, format: uuid }
+        assigned_at: { type: string, format: date-time }
+        target_date: { type: string, format: date, nullable: true }
+        status: { type: string }
+        progress_percent: { type: integer }
+        progress_breakdown:
+          type: object
+          additionalProperties: { type: integer }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        actor_id: { type: string, format: uuid }
+        actor_role: { type: string }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        ts: { type: string, format: date-time }
+        before: { type: object, nullable: true }
+        after: { type: object, nullable: true }

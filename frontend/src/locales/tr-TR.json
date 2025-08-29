@@ -1,0 +1,28 @@
+{
+  "app_title": "LGS Takip",
+  "login": {
+    "title": "Giriş Yap",
+    "username_or_email": "Kullanıcı adı veya e‑posta",
+    "password": "Şifre",
+    "submit": "Giriş",
+    "logout": "Çıkış"
+  },
+  "dashboard": {
+    "title": "Öğrenciler",
+    "grades": "Sınıflar",
+    "search": "Ad ile ara…",
+    "grade": "Sınıf",
+    "class": "Şube",
+    "guardian_phone": "Veli Tel",
+    "latest_trial": "Son Deneme",
+    "workbook_progress": "Kitap %",
+    "view": "Görüntüle"
+  },
+  "student": {
+    "overview": "Genel Bakış",
+    "trials": "Denemeler",
+    "workbooks": "Kitaplar",
+    "notes": "Notlar",
+    "activity": "Etkinlik"
+  }
+}

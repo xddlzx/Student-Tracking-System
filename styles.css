@@ -1,0 +1,7 @@
+/* Minimal print-friendly styles */
+@media print {
+  body { font-size: 12pt; color: #000; }
+  a { color: #000; text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #333; padding: 4px; }
+}
