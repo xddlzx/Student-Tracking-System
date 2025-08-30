@@ -13,14 +13,14 @@ def verify_password(password: str, hashval: str) -> bool:
         return False
 
 def validate_password(pw: str) -> list[str]:
-    errors = []
-    if len(pw) < settings.PASSWORD_MIN_LENGTH:
+    errors: list[str] = []
+    if len(pw or "") < settings.PASSWORD_MIN_LENGTH:
         errors.append("minimum_length")
-    if settings.PASSWORD_REQUIRE_NUMBER and not re.search(r"[0-9]", pw):
+    if settings.PASSWORD_REQUIRE_NUMBER and not re.search(r"[0-9]", pw or ""):
         errors.append("require_number")
-    if settings.PASSWORD_REQUIRE_UPPER and not re.search(r"[A-ZÇĞİÖŞÜ]", pw):
+    if settings.PASSWORD_REQUIRE_UPPER and not re.search(r"[A-ZÇĞİÖŞÜ]", pw or ""):
         errors.append("require_upper")
-    if settings.PASSWORD_REQUIRE_SYMBOL and not re.search(r"[^A-Za-z0-9]", pw):
+    if settings.PASSWORD_REQUIRE_SYMBOL and not re.search(r"[^A-Za-z0-9]", pw or ""):
         errors.append("require_symbol")
     return errors
 
