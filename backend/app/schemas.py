@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field, conint
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Dict
 from uuid import UUID
 from datetime import date, datetime
 
@@ -14,7 +14,7 @@ class AuthMe(BaseModel):
     email: EmailStr
     username: str
     must_change_password: bool
-    scope: List[ScopeItem] = []
+    scope: List[ScopeItem]
 
 class StudentOut(BaseModel):
     id: UUID
@@ -27,62 +27,6 @@ class StudentOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-
-class TeacherOut(BaseModel):
-    id: UUID
-    full_name: str
-    email: EmailStr
-    username: str
-    status: str
-    must_change_password: bool
-
-class TrialExamCreate(BaseModel):
-    name: str
-    source: Optional[str] = None
-    date: date
-    grade_scope: List[int]
-    subjects_config_id: UUID
-
-class TrialExamOut(TrialExamCreate):
-    id: UUID
-    is_finalized: bool
-
-class TrialSubjectInput(BaseModel):
-    subject_code: str
-    correct: conint(ge=0)
-    wrong: conint(ge=0)
-    blank: conint(ge=0)
-
-class TrialResultCreate(BaseModel):
-    student_id: UUID
-    trial_exam_id: UUID
-    subjects: List[TrialSubjectInput]
-
-class TrialSubjectOut(BaseModel):
-    subject_code: str
-    correct: int
-    wrong: int
-    blank: int
-    net: float
-
-class TrialResultOut(BaseModel):
-    id: UUID
-    student_id: UUID
-    trial_exam_id: UUID
-    correct_total: int
-    wrong_total: int
-    blank_total: int
-    net_total: float
-    subjects: List[TrialSubjectOut]
-
-class WorkbookOut(BaseModel):
-    id: UUID
-    title: str
-    subject_code: str
-    grade: int
-    publisher: Optional[str] = None
-    total_units: Optional[int] = None
-    total_pages: Optional[int] = None
 
 class StudentWorkbookCreate(BaseModel):
     workbook_id: UUID

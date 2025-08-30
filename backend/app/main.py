@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import or_, func
 from io import StringIO
 import csv
@@ -10,19 +10,30 @@ from datetime import datetime, timezone, date
 
 from .config import settings
 from .db import Base, engine, SessionLocal
-from .models import *
-from .schemas import *
+from .models import (
+    Teacher,
+    ClassSection,
+    Student,
+    TeacherScope,
+    Config,
+    SubjectsConfig,
+    TrialExam,
+    TrialResult,
+    TrialResultSubject,
+    Workbook,
+    StudentWorkbook,
+    Note,
+    AuditLog,
+    Session as SessionModel,
+)
+from .schemas import AuthMe, StudentOut, StudentWorkbookCreate, StudentWorkbookOut
 from .security import hash_password
 from .deps import get_db, require_csrf
-from .rbac import check_scope_teacher
-from .audit import audit
-
-from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, Response
 from .auth import router as auth_router
 
 app = FastAPI(title="LGS Tracker API", version="0.1.0")
 
-app.include_router(auth_router)   
+app.include_router(auth_router)
 
 @app.on_event("startup")
 def startup():
@@ -32,20 +43,32 @@ def startup():
 def healthz():
     return {"status": "ok"}
 
-def _get_user(request: Request, db: Session) -> tuple[Teacher, Session]:
+def _normalize_section(s: str | None) -> str | None:
+    if s is None:
+        return None
+    s2 = s.strip()
+    return s2.upper() if s2 else s2
+
+def _get_user(request: Request, db: DBSession) -> tuple[Teacher, SessionModel]:
     sid = request.cookies.get(settings.SESSION_COOKIE_NAME)
     if not sid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="no_session")
-    sess = db.query(Session).filter(Session.id == sid, Session.expires_at > datetime.now(timezone.utc)).first()
+    sess = db.query(SessionModel).filter(
+        SessionModel.id == sid,
+        SessionModel.expires_at > datetime.now(timezone.utc)
+    ).first()
     if not sess:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_session")
-    user = db.query(Teacher).filter(Teacher.id == sess.user_id, Teacher.status == "active").first()
+    user = db.query(Teacher).filter(
+        Teacher.id == sess.user_id,
+        Teacher.status == "active"
+    ).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user_disabled")
     return user, sess
 
 @app.get("/me", response_model=AuthMe)
-def me(request: Request, db: Session = Depends(get_db)):
+def me(request: Request, db: DBSession = Depends(get_db)):
     user, sess = _get_user(request, db)
     # Scopes
     scopes = db.query(TeacherScope).filter(TeacherScope.teacher_id == user.id).all()
@@ -58,7 +81,7 @@ def me(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/students")
 def list_students(grade: int | None = None, q: str | None = None, page: int = 1, page_size: int = 20,
-                  request: Request = None, db: Session = Depends(get_db)):
+                  request: Request = None, db: DBSession = Depends(get_db)):
     user, sess = _get_user(request, db)
     is_rooter = (user.username == "rooter")
     query = db.query(Student)
@@ -94,7 +117,7 @@ def list_students(grade: int | None = None, q: str | None = None, page: int = 1,
 @app.get("/students/{id}", response_model=StudentOut)
 def get_student(id: UUID, request: Request, db: Session = Depends(get_db)):
     user, sess = _get_user(request, db)
-    st = db.query(Student).filter(Student.id == str(id)).first()
+    st = db.query(Student).filter(Student.id == id).first()
     if not st:
         raise HTTPException(status_code=404, detail="not_found")
     if user.username != "rooter":
@@ -102,7 +125,7 @@ def get_student(id: UUID, request: Request, db: Session = Depends(get_db)):
     return st
 
 @app.post("/students/import")
-def import_students(csv_file: UploadFile, request: Request, db: Session = Depends(get_db)):
+def import_students(csv_file: UploadFile, request: Request, db: DBSession = Depends(get_db)):
     user, sess = _get_user(request, db)
     if user.username != "rooter":
         raise HTTPException(status_code=403, detail="forbidden")
@@ -114,7 +137,7 @@ def import_students(csv_file: UploadFile, request: Request, db: Session = Depend
         try:
             full_name = row["full_name"].strip()
             grade = int(row["grade"])
-            class_section = row["class_section"].strip()
+            class_section = _normalize_section(row["class_section"])
             if not (5 <= grade <= 8):
                 raise ValueError("grade_out_of_range")
             s = Student(full_name=full_name, grade=grade, class_section=class_section,
@@ -164,11 +187,11 @@ def create_trial(payload: TrialExamCreate, request: Request, db: Session = Depen
             "grade_scope": t.grade_scope, "subjects_config_id": str(t.subjects_config_id), "is_finalized": t.is_finalized}
 
 @app.post("/trials/{id}/finalize")
-def finalize_trial(id: UUID, request: Request, db: Session = Depends(get_db), csrf: None = Depends(require_csrf)):
+def finalize_trial(id: UUID, request: Request, db: DBSession = Depends(get_db), csrf: None = Depends(require_csrf)):
     user, sess = _get_user(request, db)
     if user.username != "rooter":
         raise HTTPException(403, "forbidden")
-    t = db.query(TrialExam).filter(TrialExam.id == str(id)).first()
+    t = db.query(TrialExam).filter(TrialExam.id == id).first()
     if not t:
         raise HTTPException(404, "not_found")
     t.is_finalized = True
@@ -246,17 +269,17 @@ def list_workbooks(grade: int | None = None, request: Request = None, db: Sessio
              "publisher": w.publisher, "total_units": w.total_units, "total_pages": w.total_pages} for w in items]
 
 @app.post("/students/{id}/workbooks", response_model=StudentWorkbookOut)
-def assign_workbook(id: UUID, payload: StudentWorkbookCreate, request: Request, db: Session = Depends(get_db), csrf: None = Depends(require_csrf)):
+def assign_workbook(id: UUID, payload: StudentWorkbookCreate, request: Request, db: DBSession = Depends(get_db), csrf: None = Depends(require_csrf)):
     user, sess = _get_user(request, db)
-    st = db.query(Student).filter(Student.id == str(id)).first()
+    st = db.query(Student).filter(Student.id == id).first()
     if not st:
         raise HTTPException(404, "student_not_found")
     if user.username != "rooter":
         check_scope_teacher(db, user.id, st)
-    wb = db.query(Workbook).filter(Workbook.id == str(payload.workbook_id)).first()
+    wb = db.query(Workbook).filter(Workbook.id == payload.workbook_id).first()
     if not wb:
         raise HTTPException(404, "workbook_not_found")
-    sw = StudentWorkbook(student_id=str(st.id), workbook_id=str(wb.id), assigned_by=user.id, target_date=payload.target_date)
+    sw = StudentWorkbook(student_id=st.id, workbook_id=wb.id, assigned_by=user.id, target_date=payload.target_date)
     db.add(sw); db.commit()
     audit(db, actor_id=user.id, actor_role=("rooter" if user.username=="rooter" else "teacher"),
           action="create", entity_type="student_workbook", entity_id=sw.id,
