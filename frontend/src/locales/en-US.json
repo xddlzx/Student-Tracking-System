@@ -1,0 +1,28 @@
+{
+  "app_title": "LGS Tracker",
+  "login": {
+    "title": "Sign In",
+    "username_or_email": "Username or email",
+    "password": "Password",
+    "submit": "Login",
+    "logout": "Logout"
+  },
+  "dashboard": {
+    "title": "Students",
+    "grades": "Grades",
+    "search": "Search by name…",
+    "grade": "Grade",
+    "class": "Class",
+    "guardian_phone": "Guardian Phone",
+    "latest_trial": "Latest Trial",
+    "workbook_progress": "Workbook %",
+    "view": "View"
+  },
+  "student": {
+    "overview": "Overview",
+    "trials": "Trials",
+    "workbooks": "Workbooks",
+    "notes": "Notes",
+    "activity": "Activity"
+  }
+}

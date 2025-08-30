@@ -1,0 +1,1 @@
+# API contract tests would live here (pytest or schemathesis).
