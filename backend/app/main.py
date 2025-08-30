@@ -75,7 +75,7 @@ def list_students(grade: int | None = None, q: str | None = None, page: int = 1,
     user, sess = _get_user(request, db)
     is_rooter = (user.username == "rooter")
     query = db.query(Student)
-    if not is_rooter:
+    if not is_rooter and not settings.TEACHER_GLOBAL_ACCESS:
         # apply scope
         scopes = db.query(TeacherScope).filter(TeacherScope.teacher_id == user.id).all()
         if not scopes:
@@ -112,6 +112,55 @@ def get_student(id: UUID, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="not_found")
     if user.username != "rooter":
         check_scope_teacher(db, user.id, st)
+    return st
+
+@app.put("/students/{id}", response_model=StudentOut, dependencies=[Depends(require_csrf)])
+def update_student(id: UUID, body: StudentUpdate, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    # Teachers allowed, but still pass through the (now global) scope gate
+    if user.username != "rooter":
+        check_scope_teacher(db, user.id, st)
+
+    before = {
+        "full_name": st.full_name,
+        "grade": st.grade,
+        "class_section": st.class_section,
+        "guardian_name": st.guardian_name,
+        "guardian_phone": st.guardian_phone,
+        "guardian_email": st.guardian_email,
+        "status": st.status
+    }
+
+    for field, value in body.dict(exclude_unset=True).items():
+        setattr(st, field, value.strip() if isinstance(value, str) else value)
+
+    db.commit()
+    db.refresh(st)
+
+    audit(
+        db,
+        actor_id=user.id,
+        actor_role=("rooter" if user.username == "rooter" else "teacher"),
+        action="update",
+        entity_type="student",
+        entity_id=st.id,
+        before=before,
+        after={
+            "full_name": st.full_name,
+            "grade": st.grade,
+            "class_section": st.class_section,
+            "guardian_name": st.guardian_name,
+            "guardian_phone": st.guardian_phone,
+            "guardian_email": st.guardian_email,
+            "status": st.status
+        },
+    )
+
     return st
 
 @app.post("/students/import")

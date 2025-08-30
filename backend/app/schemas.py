@@ -2,6 +2,17 @@ from pydantic import BaseModel, EmailStr, Field, conint
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import date, datetime
+from typing import Optional
+from pydantic import BaseModel, EmailStr, conint
+
+class StudentUpdate(BaseModel):
+    full_name: Optional[str] = None
+    grade: Optional[conint(ge=1, le=12)] = None
+    class_section: Optional[str] = None
+    guardian_name: Optional[str] = None
+    guardian_phone: Optional[str] = None
+    guardian_email: Optional[EmailStr] = None
+    status: Optional[str] = None
 
 class ScopeItem(BaseModel):
     grade: int

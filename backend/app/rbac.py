@@ -1,8 +1,12 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from .models import TeacherScope, Student
+from .config import settings 
 
 def check_scope_teacher(db: Session, teacher_id, student: Student) -> None:
+    if settings.TEACHER_GLOBAL_ACCESS:
+        return
+
     scopes = db.query(TeacherScope).filter(TeacherScope.teacher_id == teacher_id).all()
     allowed = False
     for sc in scopes:

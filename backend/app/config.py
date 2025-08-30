@@ -23,6 +23,8 @@ class Settings:
     PASSWORD_REQUIRE_NUMBER = bool(int(os.getenv("PASSWORD_REQUIRE_NUMBER", "1")))
     PASSWORD_REQUIRE_UPPER = bool(int(os.getenv("PASSWORD_REQUIRE_UPPER", "1")))
 
+    TEACHER_GLOBAL_ACCESS = bool(int(os.getenv("TEACHER_GLOBAL_ACCESS", "1"))) #NEW!!!
+
     ROOTER_USERNAME = os.getenv("ROOTER_USERNAME", "rooter")
     ROOTER_EMAIL = os.getenv("ROOTER_EMAIL", "rooter@example.edu.tr")
     ROOTER_PASSWORD = os.getenv("ROOTER_PASSWORD", "ChangeMe!123")
