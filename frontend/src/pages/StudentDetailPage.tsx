@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import Tabs from '../components/Tabs'
@@ -16,6 +15,8 @@ export default function StudentDetailPage() {
 
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<any>({})
+  // bump this to force TrialHistory to refetch after a successful add
+  const [trialRefresh, setTrialRefresh] = useState(0)
 
   useEffect(() => {
     if (!id) return
@@ -55,7 +56,7 @@ export default function StudentDetailPage() {
               <input className="input" disabled={!editing}
                 value={form.guardian_phone || ''} onChange={e => setForm({ ...form, guardian_phone: e.target.value })} />
             </label>
-            <label>Veli E‑posta
+            <label>Veli E-posta
               <input className="input" type="email" disabled={!editing}
                 value={form.guardian_email || ''} onChange={e => setForm({ ...form, guardian_email: e.target.value })} />
             </label>
@@ -67,8 +68,8 @@ export default function StudentDetailPage() {
         )}
         {tab === 1 && (
           <div className="grid">
-            <TrialResultForm student={student} onSubmitted={() => { /* refresh via TrialHistory useEffect */ }} />
-            <TrialHistory student={student} />
+            <TrialResultForm student={student} onSubmitted={() => setTrialRefresh(x => x + 1)} />
+            <TrialHistory student={student} refreshToken={trialRefresh} />
           </div>
         )}
         {tab === 2 && (

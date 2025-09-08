@@ -7,6 +7,7 @@ from io import StringIO
 import csv
 from uuid import UUID
 from datetime import datetime, timezone, date
+from typing import List
 
 from .config import settings
 from .db import Base, engine, SessionLocal
@@ -205,12 +206,19 @@ def import_students(csv_file: UploadFile, request: Request, db: Session = Depend
 def list_trials(grade: int | None = None, request: Request = None, db: Session = Depends(get_db)):
     user, sess = _get_user(request, db)
     q = db.query(TrialExam)
-    if grade:
-        q = q.filter(func.any(TrialExam.grade_scope) == grade)  # simple filter
+    # FIX: proper Postgres ARRAY filtering
+    if grade is not None:
+        # matches rows where 'grade' is contained in the grade_scope array
+        q = q.filter(TrialExam.grade_scope.contains([grade]))
     items = q.order_by(TrialExam.date.desc()).all()
     return [{
-        "id": str(t.id), "name": t.name, "source": t.source, "date": t.date.isoformat(),
-        "grade_scope": t.grade_scope, "subjects_config_id": str(t.subjects_config_id), "is_finalized": t.is_finalized
+        "id": str(t.id),
+        "name": t.name,
+        "source": t.source,
+        "date": t.date.isoformat(),
+        "grade_scope": t.grade_scope,
+        "subjects_config_id": str(t.subjects_config_id),
+        "is_finalized": t.is_finalized
     } for t in items]
 
 @app.post("/trials")
@@ -297,6 +305,57 @@ def create_trial_result(payload: TrialResultCreate, request: Request, db: Sessio
             "correct_total": tr.correct_total, "wrong_total": tr.wrong_total, "blank_total": tr.blank_total,
             "net_total": float(tr.net_total), "subjects": subjects_out}
 
+
+@app.get("/students/{id}/trial-results", response_model=List[TrialResultOut])
+def list_trial_results_for_student(id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="student_not_found")
+    if user.username != "rooter":
+        check_scope_teacher(db, user.id, st)
+
+    results = (
+        db.query(TrialResult)
+        .filter(TrialResult.student_id == str(st.id))
+        .order_by(TrialResult.entered_at.desc())
+        .all()
+    )
+
+    out = []
+    for r in results:
+        subjects = (
+            db.query(TrialResultSubject)
+            .filter(TrialResultSubject.trial_result_id == str(r.id))
+            .order_by(TrialResultSubject.subject_code.asc())
+            .all()
+        )
+        out.append({
+            "id": r.id,
+            "student_id": r.student_id,
+            "trial_exam_id": r.trial_exam_id,
+            "correct_total": r.correct_total,
+            "wrong_total": r.wrong_total,
+            "blank_total": r.blank_total,
+            "net_total": float(r.net_total),
+            "subjects": [
+                {
+                    "subject_code": s.subject_code,
+                    "correct": s.correct,
+                    "wrong": s.wrong,
+                    "blank": s.blank,
+                    "net": float(s.net),
+                }
+                for s in subjects
+            ],
+        })
+    return out
+
+# Backwards-compat alias for older frontends/components:
+@app.get("/students/{id}/trials", response_model=List[TrialResultOut])
+def list_trial_results_for_student_alias(id: UUID, request: Request, db: Session = Depends(get_db)):
+    return list_trial_results_for_student(id, request, db)
+
 @app.get("/workbooks")
 def list_workbooks(grade: int | None = None, request: Request = None, db: Session = Depends(get_db)):
     user, sess = _get_user(request, db)
@@ -324,6 +383,51 @@ def assign_workbook(id: UUID, payload: StudentWorkbookCreate, request: Request, 
           action="create", entity_type="student_workbook", entity_id=sw.id,
           after={"student_id": str(st.id), "workbook_id": str(wb.id)})
     return sw
+
+@app.get("/students/{id}/trials")
+def student_trial_history(id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(404, "not_found")
+    if user.username != "rooter":
+        check_scope_teacher(db, user.id, st)
+
+    results = (
+        db.query(TrialResult)
+          .filter(TrialResult.student_id == str(id))
+          .order_by(TrialResult.entered_at.asc())
+          .all()
+    )
+
+    out = []
+    for r in results:
+        subs = (
+            db.query(TrialResultSubject)
+              .filter(TrialResultSubject.trial_result_id == str(r.id))
+              .order_by(TrialResultSubject.subject_code.asc())
+              .all()
+        )
+        out.append({
+            "id": str(r.id),
+            "student_id": str(r.student_id),
+            "trial_exam_id": str(r.trial_exam_id),
+            "correct_total": int(r.correct_total),
+            "wrong_total": int(r.wrong_total),
+            "blank_total": int(r.blank_total),
+            "net_total": float(r.net_total),
+            "entered_at": r.entered_at.isoformat() if r.entered_at else None,
+            "subjects": [
+                {
+                    "subject_code": s.subject_code,
+                    "correct": int(s.correct),
+                    "wrong": int(s.wrong),
+                    "blank": int(s.blank),
+                    "net": float(s.net),
+                } for s in subs
+            ],
+        })
+    return out
 
 @app.get("/audit")
 def audit_view(actor_id: UUID | None = None, action: str | None = None, entity_type: str | None = None,
