@@ -19,12 +19,3 @@ export function getCookie(name: string): string | null {
   const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')
   return m ? m.pop() || null : null
 }
-
-
-export async function me() {
-  try {
-    return await api('/me');
-  } catch (e) {
-    return null;
-  }
-}

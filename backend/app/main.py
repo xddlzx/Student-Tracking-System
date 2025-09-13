@@ -527,3 +527,4 @@ def create_student(body: StudentCreate, request: Request, db: Session = Depends(
         "guardian_name": st.guardian_name, "guardian_phone": st.guardian_phone, "guardian_email": st.guardian_email,
         "status": st.status, "created_at": st.created_at, "updated_at": st.updated_at
     }
+
