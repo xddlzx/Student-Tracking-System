@@ -146,3 +146,40 @@ class Session(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     last_seen_ip = Column(Text)
     user_agent = Column(Text)
+
+class SubjectOutcome(Base):
+    __tablename__ = "subject_outcome"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    subject_code = Column(Text, nullable=False)  # TR, MAT, FEN, INK, DIN, ING
+    code = Column(Integer, nullable=False)       # 1..N within subject
+    text = Column(Text, nullable=False)
+    __table_args__ = (UniqueConstraint("subject_code", "code", name="uq_subject_outcome"),)
+
+class ResourceBook(Base):
+    __tablename__ = "resource_book"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Use the actual Student table name dynamically to avoid FK mismatches:
+    student_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{Student.__tablename__}.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    name = Column(Text, nullable=False)
+    subject_code = Column(Text, nullable=False)  # TR, MAT, FEN, INK, DIN, ING
+    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
+
+class ResourceOutcomeCheck(Base):
+    __tablename__ = "resource_outcome_check"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_book_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{ResourceBook.__tablename__}.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    outcome_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{SubjectOutcome.__tablename__}.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    checked = Column(Boolean, default=False, nullable=False)
+    __table_args__ = (UniqueConstraint("resource_book_id", "outcome_id", name="uq_resource_outcome_check"),)

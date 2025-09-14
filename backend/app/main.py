@@ -25,11 +25,33 @@ app = FastAPI(title="LGS Tracker API", version="0.1.0")
 
 app.include_router(auth_router)   
 
+SUBJECTS = [
+    {"code": "TR",  "label": "Türkçe"},
+    {"code": "MAT", "label": "Matematik"},
+    {"code": "FEN", "label": "Fen Bilimleri"},
+    {"code": "INK", "label": "T.C. İnkılap Tarihi ve Atatürkçülük"},
+    {"code": "DIN", "label": "Din Kültürü"},
+    {"code": "ING", "label": "İngilizce"},
+]
+
+def _ensure_subject_outcomes_seed(db: Session):
+    # If no outcomes exist at all, seed with 20 generic outcomes per subject.
+    existing = db.query(SubjectOutcome).count()
+    if existing > 0:
+        return
+    items = []
+    for s in SUBJECTS:
+        for i in range(1, 21):
+            items.append(SubjectOutcome(subject_code=s["code"], code=i, text=f"Kazanım {i}"))
+    db.bulk_save_objects(items)
+    db.commit()
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
     # --- ensure a rooter user exists ---
     with SessionLocal() as db:
+        _ensure_subject_outcomes_seed(db)
         existing = db.query(Teacher).filter(Teacher.username == settings.ROOTER_USERNAME).first()
         if not existing:
             db.add(Teacher(
@@ -528,3 +550,231 @@ def create_student(body: StudentCreate, request: Request, db: Session = Depends(
         "status": st.status, "created_at": st.created_at, "updated_at": st.updated_at
     }
 
+# --- NEW: Resource book & outcomes endpoints ---
+
+@app.get("/students/{id}/resource-books", response_model=List[ResourceBookOut])
+def list_resource_books_for_student(id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="student_not_found")
+    books = db.query(ResourceBook).filter(ResourceBook.student_id == str(id)).order_by(ResourceBook.created_at.asc()).all()
+    out = []
+    for b in books:
+        total = db.query(func.count(SubjectOutcome.id)).filter(SubjectOutcome.subject_code == b.subject_code).scalar() or 0
+        checked = (
+            db.query(func.count(ResourceOutcomeCheck.id))
+              .join(SubjectOutcome, ResourceOutcomeCheck.outcome_id == SubjectOutcome.id)
+              .filter(ResourceOutcomeCheck.resource_book_id == b.id)
+              .filter(ResourceOutcomeCheck.checked == True)
+              .filter(SubjectOutcome.subject_code == b.subject_code)
+              .scalar()
+        ) or 0
+        progress = int(round((checked / total) * 100)) if total > 0 else 0
+        out.append({"id": str(b.id), "name": b.name, "subject_code": b.subject_code, "progress_percent": progress})
+    return out
+
+@app.post("/students/{id}/resource-books", response_model=ResourceBookOut)
+def create_resource_book_for_student(id: UUID, body: ResourceBookCreate, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="student_not_found")
+    if body.subject_code not in [s["code"] for s in SUBJECTS]:
+        raise HTTPException(status_code=400, detail="invalid_subject")
+    rb = ResourceBook(student_id=str(id), name=body.name.strip(), subject_code=body.subject_code)
+    db.add(rb); db.commit(); db.refresh(rb)
+    try:
+        audit(db, actor_id=user.id, actor_role="teacher", action="create", entity_type="resource_book", entity_id=rb.id,
+              after={"student_id": str(id), "name": rb.name, "subject_code": rb.subject_code})
+    except Exception:
+        pass
+    return {"id": str(rb.id), "name": rb.name, "subject_code": rb.subject_code, "progress_percent": 0}
+
+@app.get("/resource-books/{book_id}/outcomes", response_model=List[OutcomeWithCheck])
+def get_outcomes_for_resource_book(book_id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    rb = db.query(ResourceBook).filter(ResourceBook.id == str(book_id)).first()
+    if not rb:
+        raise HTTPException(status_code=404, detail="resource_book_not_found")
+    outcomes = db.query(SubjectOutcome).filter(SubjectOutcome.subject_code == rb.subject_code).order_by(SubjectOutcome.code.asc()).all()
+    checks = { str(x.outcome_id): x for x in db.query(ResourceOutcomeCheck).filter(ResourceOutcomeCheck.resource_book_id == rb.id).all() }
+    out = []
+    for o in outcomes:
+        oc = checks.get(str(o.id))
+        out.append({
+            "outcome_id": str(o.id),
+            "subject_code": o.subject_code,
+            "code": o.code,
+            "text": o.text,
+            "checked": bool(oc.checked) if oc else False
+        })
+    return out
+
+@app.post("/resource-books/{book_id}/outcomes/toggle")
+def toggle_outcomes_for_resource_book(book_id: UUID, body: ToggleOutcomeBulkIn, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    rb = db.query(ResourceBook).filter(ResourceBook.id == str(book_id)).first()
+    if not rb:
+        raise HTTPException(status_code=404, detail="resource_book_not_found")
+    # validate outcome ids belong to rb.subject_code
+    valid_ids = set(x.id for x in db.query(SubjectOutcome.id).filter(SubjectOutcome.subject_code == rb.subject_code).all())
+    for item in body.items:
+        if item.outcome_id not in valid_ids:
+            continue
+        rec = db.query(ResourceOutcomeCheck).filter(
+            ResourceOutcomeCheck.resource_book_id == rb.id,
+            ResourceOutcomeCheck.outcome_id == item.outcome_id
+        ).first()
+        if not rec:
+            rec = ResourceOutcomeCheck(resource_book_id=rb.id, outcome_id=item.outcome_id, checked=item.checked)
+            db.add(rec)
+        else:
+            rec.checked = item.checked
+    db.commit()
+    # return fresh progress
+    total = db.query(func.count(SubjectOutcome.id)).filter(SubjectOutcome.subject_code == rb.subject_code).scalar() or 0
+    checked = (
+        db.query(func.count(ResourceOutcomeCheck.id))
+          .join(SubjectOutcome, ResourceOutcomeCheck.outcome_id == SubjectOutcome.id)
+          .filter(ResourceOutcomeCheck.resource_book_id == rb.id, ResourceOutcomeCheck.checked == True)
+          .filter(SubjectOutcome.subject_code == rb.subject_code)
+          .scalar()
+    ) or 0
+    progress = int(round((checked / total) * 100)) if total > 0 else 0
+    return {"ok": True, "progress_percent": progress}
+
+@app.get("/students/{id}/workbooks")
+def list_student_workbooks(id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="student_not_found")
+    rows = db.query(StudentWorkbook).filter(StudentWorkbook.student_id == str(id)).order_by(StudentWorkbook.assigned_at.asc()).all()
+    out = []
+    for sw in rows:
+        w = db.query(Workbook).filter(Workbook.id == sw.workbook_id).first()
+        out.append({
+            "id": str(sw.id),
+            "status": sw.status,
+            "progress_percent": sw.progress_percent,
+            "assigned_at": sw.assigned_at,
+            "workbook": {
+                "id": str(w.id) if w else None,
+                "title": w.title if w else None,
+                "subject_code": w.subject_code if w else None,
+                "grade": w.grade if w else None,
+                "publisher": w.publisher if w else None,
+                "total_units": w.total_units if w else None,
+                "total_pages": w.total_pages if w else None,
+            }
+        })
+    return out
+
+@app.get("/students/{id}/resource-books", response_model=List[ResourceBookOut])
+def list_resource_books_for_student(id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="student_not_found")
+    books = (db.query(ResourceBook)
+               .filter(ResourceBook.student_id == str(id))
+               .order_by(ResourceBook.created_at.asc())
+               .all())
+    out = []
+    for b in books:
+        total = (db.query(func.count(SubjectOutcome.id))
+                   .filter(SubjectOutcome.subject_code == b.subject_code)
+                   .scalar()) or 0
+        checked = (db.query(func.count(ResourceOutcomeCheck.id))
+                     .join(SubjectOutcome, ResourceOutcomeCheck.outcome_id == SubjectOutcome.id)
+                     .filter(ResourceOutcomeCheck.resource_book_id == b.id)
+                     .filter(ResourceOutcomeCheck.checked == True)
+                     .filter(SubjectOutcome.subject_code == b.subject_code)
+                     .scalar()) or 0
+        progress = int(round((checked / total) * 100)) if total > 0 else 0
+        out.append({"id": b.id, "name": b.name, "subject_code": b.subject_code, "progress_percent": progress})
+    return out
+
+@app.post("/students/{id}/resource-books", response_model=ResourceBookOut)
+def create_resource_book_for_student(id: UUID, body: ResourceBookCreate, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    st = db.query(Student).filter(Student.id == str(id)).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="student_not_found")
+    if body.subject_code not in [s["code"] for s in SUBJECTS]:
+        raise HTTPException(status_code=400, detail="invalid_subject")
+    rb = ResourceBook(student_id=str(id), name=body.name.strip(), subject_code=body.subject_code)
+    db.add(rb); db.commit(); db.refresh(rb)
+    try:
+        audit(db, actor_id=user.id, actor_role="teacher", action="create", entity_type="resource_book", entity_id=rb.id,
+              after={"student_id": str(id), "name": rb.name, "subject_code": rb.subject_code})
+    except Exception:
+        pass
+    return {"id": rb.id, "name": rb.name, "subject_code": rb.subject_code, "progress_percent": 0}
+
+@app.get("/resource-books/{book_id}/outcomes", response_model=List[OutcomeWithCheck])
+def get_outcomes_for_resource_book(book_id: UUID, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    rb = db.query(ResourceBook).filter(ResourceBook.id == str(book_id)).first()
+    if not rb:
+        raise HTTPException(status_code=404, detail="resource_book_not_found")
+    outcomes = (db.query(SubjectOutcome)
+                  .filter(SubjectOutcome.subject_code == rb.subject_code)
+                  .order_by(SubjectOutcome.code.asc())
+                  .all())
+    checks = {
+        str(x.outcome_id): x
+        for x in db.query(ResourceOutcomeCheck)
+                   .filter(ResourceOutcomeCheck.resource_book_id == rb.id)
+                   .all()
+    }
+    out = []
+    for o in outcomes:
+        oc = checks.get(str(o.id))
+        out.append({
+            "outcome_id": o.id,
+            "subject_code": o.subject_code,
+            "code": o.code,
+            "text": o.text,
+            "checked": bool(oc.checked) if oc else False
+        })
+    return out
+
+@app.post("/resource-books/{book_id}/outcomes/toggle")
+def toggle_outcomes_for_resource_book(book_id: UUID, body: ToggleOutcomeBulkIn, request: Request, db: Session = Depends(get_db)):
+    user, sess = _get_user(request, db)
+    rb = db.query(ResourceBook).filter(ResourceBook.id == str(book_id)).first()
+    if not rb:
+        raise HTTPException(status_code=404, detail="resource_book_not_found")
+
+    # IMPORTANT FIX: querying a single column returns rows (tuples). Use row[0].
+    valid_id_rows = (db.query(SubjectOutcome.id)
+                       .filter(SubjectOutcome.subject_code == rb.subject_code)
+                       .all())
+    valid_ids = set(str(row[0]) for row in valid_id_rows)
+
+    for item in body.items:
+        if str(item.outcome_id) not in valid_ids:
+            continue
+        rec = (db.query(ResourceOutcomeCheck)
+                 .filter(ResourceOutcomeCheck.resource_book_id == rb.id,
+                         ResourceOutcomeCheck.outcome_id == item.outcome_id)
+                 .first())
+        if not rec:
+            rec = ResourceOutcomeCheck(resource_book_id=rb.id, outcome_id=item.outcome_id, checked=item.checked)
+            db.add(rec)
+        else:
+            rec.checked = item.checked
+    db.commit()
+
+    total = (db.query(func.count(SubjectOutcome.id))
+               .filter(SubjectOutcome.subject_code == rb.subject_code)
+               .scalar()) or 0
+    checked = (db.query(func.count(ResourceOutcomeCheck.id))
+                 .join(SubjectOutcome, ResourceOutcomeCheck.outcome_id == SubjectOutcome.id)
+                 .filter(ResourceOutcomeCheck.resource_book_id == rb.id, ResourceOutcomeCheck.checked == True)
+                 .filter(SubjectOutcome.subject_code == rb.subject_code)
+                 .scalar()) or 0
+    progress = int(round((checked / total) * 100)) if total > 0 else 0
+    return {"ok": True, "progress_percent": progress}

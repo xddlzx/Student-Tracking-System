@@ -148,3 +148,33 @@ class AuditItem(BaseModel):
     after: Optional[Dict[str, Any]] = None
     ip: Optional[str] = None
     user_agent: Optional[str] = None
+
+class ResourceBookCreate(BaseModel):
+    name: str
+    subject_code: str
+
+class ResourceBookOut(BaseModel):
+    id: UUID
+    name: str
+    subject_code: str
+    progress_percent: int
+
+class SubjectOutcomeOut(BaseModel):
+    id: UUID
+    subject_code: str
+    code: int
+    text: str
+
+class OutcomeWithCheck(BaseModel):
+    outcome_id: UUID
+    subject_code: str
+    code: int
+    text: str
+    checked: bool
+
+class ToggleOutcomeIn(BaseModel):
+    outcome_id: UUID
+    checked: bool
+
+class ToggleOutcomeBulkIn(BaseModel):
+    items: List[ToggleOutcomeIn]
