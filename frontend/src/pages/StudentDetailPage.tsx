@@ -23,7 +23,7 @@ export default function StudentDetailPage() {
     api(`/students/${id}`).then(st => { setStudent(st); setForm(st) })
   }, [id])
 
-  async function save(){
+  async function save() {
     await api(`/students/${id}`, { method: 'PUT', body: JSON.stringify(form) })
     setEditing(false)
     const st = await api(`/students/${id}`); setStudent(st); setForm(st)
@@ -34,13 +34,13 @@ export default function StudentDetailPage() {
   return (
     <div className="container">
       <div className="card">
-        <div className="flex" style={{justifyContent:'space-between'}}>
+        <div className="flex" style={{ justifyContent: 'space-between' }}>
           <h2>{student.full_name} <span className="badge">{student.grade}</span> {student.class_section}</h2>
           <div className="flex">
             {!editing ? <button className="btn" onClick={() => setEditing(true)}>Düzenle</button> :
               (<>
                 <button className="btn" onClick={() => (setEditing(false), setForm(student))}>Vazgeç</button>
-                <button className="btn primary" onClick={save} style={{marginLeft:8}}>Kaydet</button>
+                <button className="btn primary" onClick={save} style={{ marginLeft: 8 }}>Kaydet</button>
               </>)
             }
           </div>
